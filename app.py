@@ -65,15 +65,18 @@ with st.form("stock_form"):
                     st.error("Not enough stock to issue.")
                 else:
                     base_stock_df.at[index, 'QuantityAvailable'] -= quantity
-                    stock_log_df = stock_log_df.append({
-                        'Date': datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        'Project': project,
-                        'ProductCode': product_code,
-                        'ProductName': product_name,
-                        'Quantity': quantity,
-                        'Action': "Issued",
-                        'PerformedBy': performed_by
-                    }, ignore_index=True)
+                    new_row = pd.DataFrame([{
+    'Date': datetime.now().strftime("%Y-%m-%d %H:%M"),
+    'Project': project,
+    'ProductCode': product_code,
+    'ProductName': product_name,
+    'Quantity': quantity,
+    'Action': action,
+    'PerformedBy': performed_by
+}])
+
+stock_log_df = pd.concat([stock_log_df, new_row], ignore_index=True)
+
                     st.success(f"{quantity} units issued to {project}")
 
             # Save updated data
