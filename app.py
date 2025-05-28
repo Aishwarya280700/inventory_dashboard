@@ -3,14 +3,14 @@ import pandas as pd
 from datetime import datetime
 
 # Load Excel files
-base_stock_df = pd.read_excel("inventory_stock.xlsx")
+base_stock_df = pd.read_excel("base_stock.xlsx")
 lfp_ev_bom_df = pd.read_excel("lfp_ev_bom.xlsx")
 lfp_ess_bom_df = pd.read_excel("lfp_ess_bom.xlsx")
 nmc_gen2_bom_df = pd.read_excel("nmc_gen2_bom.xlsx")
 stock_log_df = pd.read_excel("stock_log.xlsx")
 
 # Header
-st.title("📦 Inventory Dashboard")
+st.title("📦 Inventory Dashboard (Multi-Project)")
 st.markdown("Manage and track stock in and out for multiple projects.")
 
 # Display base stock
