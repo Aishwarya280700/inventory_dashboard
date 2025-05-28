@@ -16,6 +16,7 @@ if "authenticated" not in st.session_state:
     st.session_state.role = ""
 
 # --- Login Page ---
+
 def show_login():
     st.title("🔐 Inventory Login")
     username = st.text_input("Username")
@@ -28,7 +29,7 @@ def show_login():
             st.session_state.username = username
             st.session_state.role = credentials[username]["role"]
             st.success(f"✅ Welcome, {username} ({st.session_state.role})")
-            st.experimental_rerun()
+            st.rerun()  # Use st.rerun() instead of st.experimental_rerun()
         else:
             st.error("❌ Invalid username or password")
 
