@@ -38,7 +38,7 @@ def logout():
     st.session_state.authenticated = False
     st.session_state.username = ""
     st.session_state.role = ""
-    st.experimental_rerun()
+    st.rerun() 
 
 # --- Block app until login ---
 if not st.session_state.authenticated:
