@@ -2,13 +2,55 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-# Load base stock and BOM files
+# --- Simple hardcoded credentials ---
+credentials = {
+    "admin": {"password": "admin123", "role": "Admin"},
+    "user1": {"password": "user123", "role": "Project User"},
+    "user2": {"password": "user456", "role": "Project User"}
+}
+
+# --- Session state for login ---
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+    st.session_state.username = ""
+    st.session_state.role = ""
+
+def login():
+    st.title("🔐 Inventory Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if username in credentials and credentials[username]['password'] == password:
+            st.session_state.authenticated = True
+            st.session_state.username = username
+            st.session_state.role = credentials[username]['role']
+            st.success(f"✅ Welcome, {username} ({st.session_state.role})")
+            st.experimental_rerun()
+        else:
+            st.error("❌ Invalid username or password.")
+
+def logout():
+    st.session_state.authenticated = False
+    st.session_state.username = ""
+    st.session_state.role = ""
+    st.experimental_rerun()
+
+# --- Show login if not authenticated ---
+if not st.session_state.authenticated:
+    login()
+    st.stop()
+
+# --- Main app starts below if authenticated ---
+st.sidebar.write(f"👤 Logged in as: {st.session_state.username}")
+if st.sidebar.button("Logout"):
+    logout()
+
+# --- Load Excel files ---
 base_stock_df = pd.read_excel("base_stock.xlsx")
 lfp_ev_bom_df = pd.read_excel("lfp_ev_bom.xlsx")
 lfp_ess_bom_df = pd.read_excel("lfp_ess_bom.xlsx")
 nmc_gen2_bom_df = pd.read_excel("nmc_gen2_bom.xlsx")
 
-# Load or create stock log
 try:
     stock_log_df = pd.read_excel("stock_log.xlsx")
 except FileNotFoundError:
@@ -17,120 +59,98 @@ except FileNotFoundError:
         'Quantity', 'Action', 'PerformedBy'
     ])
 
-# Function to calculate total required quantity for each product across all projects
+# --- Helper functions ---
 def get_total_required_qty():
     all_boms = pd.concat([lfp_ev_bom_df, lfp_ess_bom_df, nmc_gen2_bom_df])
     all_boms['RequiredQuantity'] = pd.to_numeric(all_boms['RequiredQuantity'], errors='coerce').fillna(0)
-    total_req = all_boms.groupby('ProductCode')['RequiredQuantity'].sum().reset_index()
-    return total_req
+    return all_boms.groupby('ProductCode')['RequiredQuantity'].sum().reset_index()
 
-# Highlight products needing replenishment in base stock df
 def highlight_replenishment(row):
     total_req = total_required_dict.get(row['ProductCode'], 0)
-    if row['QuantityAvailable'] < total_req:
-        return ['background-color: #ff9999']*len(row)
-    else:
-        return ['']*len(row)
+    return ['background-color: #ff9999'] * len(row) if row['QuantityAvailable'] < total_req else [''] * len(row)
 
-# Calculate total required quantities once (refresh every run)
+# --- Compute required quantities ---
 total_required_df = get_total_required_qty()
 total_required_dict = dict(zip(total_required_df['ProductCode'], total_required_df['RequiredQuantity']))
 
-# Select role
+# --- Main UI ---
 st.title("📦 Inventory Dashboard")
-role = st.radio("Select Role", ["Admin", "Project User"])
 
-if role == "Admin":
+if st.session_state.role == "Admin":
     st.header("🔼 Add or Remove Stock from Base Inventory")
     action = st.selectbox("Action", ["Add Stock", "Remove Stock"])
 
-    with st.form("manage_stock_form"):
+    with st.form("admin_form"):
         product_code = st.text_input("Product Code")
         quantity = st.number_input("Quantity", min_value=1)
-        performed_by = st.text_input("Your Name")
-        submitted = st.form_submit_button("Submit")
+        submitted_by = st.session_state.username
+        submit = st.form_submit_button("Submit")
 
-        if submitted:
+        if submit:
             if product_code not in base_stock_df['ProductCode'].values:
-                st.error("❌ Product code not found in base stock.")
+                st.error("❌ Product code not found.")
             else:
                 idx = base_stock_df.index[base_stock_df['ProductCode'] == product_code][0]
                 if action == "Add Stock":
                     base_stock_df.at[idx, 'QuantityAvailable'] += quantity
-                    action_str = "Added"
-                    st.success(f"✅ Added {quantity} units to {product_code} in base stock.")
+                    act = "Added"
+                    st.success(f"✅ {quantity} units added to {product_code}")
                 else:
-                    # Remove stock with validation
                     if base_stock_df.at[idx, 'QuantityAvailable'] < quantity:
-                        st.error(f"❌ Cannot remove {quantity} units. Only {base_stock_df.at[idx, 'QuantityAvailable']} available.")
-                    else:
-                        base_stock_df.at[idx, 'QuantityAvailable'] -= quantity
-                        action_str = "Removed"
-                        st.success(f"✅ Removed {quantity} units from {product_code} in base stock.")
+                        st.error("❌ Not enough stock to remove.")
+                        st.stop()
+                    base_stock_df.at[idx, 'QuantityAvailable'] -= quantity
+                    act = "Removed"
+                    st.success(f"✅ {quantity} units removed from {product_code}")
 
-                # Log action if success
-                if 'action_str' in locals():
-                    new_row = pd.DataFrame([{
-                        'Date': datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        'Project': '',
-                        'ProductCode': product_code,
-                        'ProductName': base_stock_df.at[idx, 'ProductName'],
-                        'Quantity': quantity,
-                        'Action': action_str,
-                        'PerformedBy': performed_by
-                    }])
-                    stock_log_df = pd.concat([stock_log_df, new_row], ignore_index=True)
-
-                    # Save changes
-                    base_stock_df.to_excel("base_stock.xlsx", index=False)
-                    stock_log_df.to_excel("stock_log.xlsx", index=False)
+                # Log and save
+                new_row = pd.DataFrame([{
+                    'Date': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    'Project': '',
+                    'ProductCode': product_code,
+                    'ProductName': base_stock_df.at[idx, 'ProductName'],
+                    'Quantity': quantity,
+                    'Action': act,
+                    'PerformedBy': submitted_by
+                }])
+                stock_log_df = pd.concat([stock_log_df, new_row], ignore_index=True)
+                base_stock_df.to_excel("base_stock.xlsx", index=False)
+                stock_log_df.to_excel("stock_log.xlsx", index=False)
 
 else:
     st.header("🔽 Issue Stock to Project")
-    project = st.selectbox("Select Project", ["LFP EV", "LFP ESS", "NMC Gen 2"])
-    product_code = st.text_input("Product Code to Issue")
-    quantity = st.number_input("Quantity to Issue", min_value=1)
-    performed_by = st.text_input("Your Name")
-    issue_button = st.button("Issue Stock")
+    project = st.selectbox("Project", ["LFP EV", "LFP ESS", "NMC Gen 2"])
+    product_code = st.text_input("Product Code")
+    quantity = st.number_input("Quantity", min_value=1)
+    submitted_by = st.session_state.username
 
-    if issue_button:
-        # Validate product in base stock
+    if st.button("Issue Stock"):
         if product_code not in base_stock_df['ProductCode'].values:
-            st.error("❌ Product code not found in base stock.")
+            st.error("❌ Product not found.")
         else:
             base_idx = base_stock_df.index[base_stock_df['ProductCode'] == product_code][0]
             base_qty = base_stock_df.at[base_idx, 'QuantityAvailable']
 
-            # Get BOM df for selected project
             if project == "LFP EV":
-                bom_df = lfp_ev_bom_df
-                bom_file = "lfp_ev_bom.xlsx"
+                bom_df, bom_file = lfp_ev_bom_df, "lfp_ev_bom.xlsx"
             elif project == "LFP ESS":
-                bom_df = lfp_ess_bom_df
-                bom_file = "lfp_ess_bom.xlsx"
+                bom_df, bom_file = lfp_ess_bom_df, "lfp_ess_bom.xlsx"
             else:
-                bom_df = nmc_gen2_bom_df
-                bom_file = "nmc_gen2_bom.xlsx"
+                bom_df, bom_file = nmc_gen2_bom_df, "nmc_gen2_bom.xlsx"
 
-            # Validate product in BOM
             if product_code not in bom_df['ProductCode'].values:
-                st.error(f"❌ Product code not found in {project} BOM.")
+                st.error("❌ Product not found in BOM.")
             else:
                 bom_idx = bom_df.index[bom_df['ProductCode'] == product_code][0]
                 required_qty = bom_df.at[bom_idx, 'RequiredQuantity']
-
-                # Check stock and required quantity
                 if quantity > base_qty:
-                    st.error("❌ Not enough quantity available in base stock.")
+                    st.error("❌ Not enough stock.")
                 elif quantity > required_qty:
-                    st.error(f"❌ Quantity exceeds project required quantity ({required_qty}).")
+                    st.error("❌ Exceeds required quantity.")
                 else:
-                    # Deduct from base stock
                     base_stock_df.at[base_idx, 'QuantityAvailable'] -= quantity
-                    # Deduct from project BOM required quantity
                     bom_df.at[bom_idx, 'RequiredQuantity'] -= quantity
 
-                    # Log issue action
                     new_row = pd.DataFrame([{
                         'Date': datetime.now().strftime("%Y-%m-%d %H:%M"),
                         'Project': project,
@@ -138,30 +158,25 @@ else:
                         'ProductName': base_stock_df.at[base_idx, 'ProductName'],
                         'Quantity': quantity,
                         'Action': 'Issued',
-                        'PerformedBy': performed_by
+                        'PerformedBy': submitted_by
                     }])
                     stock_log_df = pd.concat([stock_log_df, new_row], ignore_index=True)
-
-                    # Save all changes
                     base_stock_df.to_excel("base_stock.xlsx", index=False)
                     bom_df.to_excel(bom_file, index=False)
                     stock_log_df.to_excel("stock_log.xlsx", index=False)
+                    st.success(f"✅ Issued {quantity} units to {project}")
 
-                    st.success(f"✅ Issued {quantity} units of {product_code} to {project}.")
-
-# Show current stock and BOM summaries
-st.subheader("📋 Current Base Stock (Products needing replenishment are highlighted in red)")
-
-# Apply highlighting for replenishment need
+# Display current data
+st.subheader("📋 Current Base Stock (Replenishment needed highlighted)")
 st.dataframe(base_stock_df.style.apply(highlight_replenishment, axis=1))
 
-st.subheader("📁 Current Project BOMs")
-st.write("LFP EV BOM")
+st.subheader("📁 BOMs")
+st.write("🔹 LFP EV")
 st.dataframe(lfp_ev_bom_df)
-st.write("LFP ESS BOM")
+st.write("🔹 LFP ESS")
 st.dataframe(lfp_ess_bom_df)
-st.write("NMC Gen 2 BOM")
+st.write("🔹 NMC Gen 2")
 st.dataframe(nmc_gen2_bom_df)
 
-st.subheader("🕓 Stock Movement Log")
+st.subheader("📜 Stock Log")
 st.dataframe(stock_log_df)
